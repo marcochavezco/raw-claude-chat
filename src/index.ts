@@ -5,8 +5,10 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 type Message = {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | any[];
 };
+
+const history: Message[] = [];
 
 function getWordCount(text: string): number {
   const words = String(text).split(' ');
@@ -14,6 +16,10 @@ function getWordCount(text: string): number {
   const wordCount = words.length;
 
   return wordCount;
+}
+
+function reverseText(text: string): string {
+  return String(text).split('').reverse().join('');
 }
 
 function getHeaders() {
@@ -30,6 +36,7 @@ function buildRequest(messages: any) {
     max_tokens: 1024,
     system: 'Respond every message in Spanish.',
     messages,
+    tool_choice: { type: 'auto', disable_parallel_tool_use: true },
     tools: [
       {
         name: 'get_word_count',
@@ -45,12 +52,29 @@ function buildRequest(messages: any) {
           required: ['text'],
         },
       },
+      {
+        name: 'reverse_text',
+        description: 'Reverses the given text',
+        input_schema: {
+          type: 'object',
+          properties: {
+            text: {
+              type: 'string',
+              description: 'The text to reverse',
+            },
+          },
+          required: ['text'],
+        },
+      },
     ],
   };
 }
 
-async function chat(messages: Message[]) {
+async function chat(initialMessages: Message[]) {
   const URL = 'https://api.anthropic.com/v1/messages';
+
+  let data: any;
+  let messages = [...initialMessages];
 
   try {
     const res = await fetch(URL, {
@@ -59,18 +83,28 @@ async function chat(messages: Message[]) {
       body: JSON.stringify(buildRequest(messages)),
     });
 
-    const data = await res.json();
+    data = await res.json();
 
     if (!res.ok) {
       throw new Error(JSON.stringify(data));
     }
 
-    if (data.stop_reason === 'tool_use') {
+    while (data.stop_reason === 'tool_use') {
       const toolUse = data.content.find((b: any) => b.type === 'tool_use');
 
-      const result = getWordCount(toolUse.input.text);
+      let result: string;
+      switch (toolUse.name) {
+        case 'get_word_count':
+          result = String(getWordCount(toolUse.input.text));
+          break;
+        case 'reverse_text':
+          result = reverseText(toolUse.input.text);
+          break;
+        default:
+          throw new Error(`Unknown tool: ${toolUse.name}`);
+      }
 
-      const updatedMessages = [
+      messages = [
         ...messages,
         { role: 'assistant', content: data.content },
         {
@@ -79,17 +113,19 @@ async function chat(messages: Message[]) {
             {
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: String(result),
+              content: result,
             },
           ],
         },
       ];
 
-      return await fetch(URL, {
+      const next = await fetch(URL, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify(buildRequest(updatedMessages)),
-      }).then((r) => r.json());
+        body: JSON.stringify(buildRequest(messages)),
+      });
+
+      data = await next.json();
     }
     return data;
   } catch (error: any) {
@@ -98,12 +134,14 @@ async function chat(messages: Message[]) {
   }
 }
 
-const history: Message[] = [];
-
 async function conversation(message: Message) {
   history.push(message);
   try {
     const response = await chat(history);
+
+    if (!response) {
+      throw new Error('chat() returned null');
+    }
 
     const content = response.content[0];
 
@@ -131,12 +169,7 @@ async function startLoop() {
     }
 
     const response = await conversation({ role: 'user', content: answer });
-    console.log(
-      'Assintant: ',
-      response?.content.type === 'tool_result' ?
-        response.content.content
-      : response?.content,
-    );
+    console.log('Assintant: ', response?.content);
 
     await startLoop();
   });
