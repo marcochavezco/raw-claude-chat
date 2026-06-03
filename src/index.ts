@@ -70,6 +70,14 @@ function buildRequest(messages: any) {
   };
 }
 
+function getContextWindow(history: Message[], maxMessages: number): Message[] {
+  if (history.length > maxMessages) {
+    return history.slice(-maxMessages);
+  }
+
+  return history;
+}
+
 async function chat(initialMessages: Message[]) {
   const URL = 'https://api.anthropic.com/v1/messages';
 
@@ -80,7 +88,7 @@ async function chat(initialMessages: Message[]) {
     const res = await fetch(URL, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify(buildRequest(messages)),
+      body: JSON.stringify(buildRequest(getContextWindow(messages, 6))),
     });
 
     data = await res.json();
@@ -88,6 +96,10 @@ async function chat(initialMessages: Message[]) {
     if (!res.ok) {
       throw new Error(JSON.stringify(data));
     }
+
+    console.log(
+      `[tokens] input: ${data.usage.input_tokens} | output: ${data.usage.output_tokens} | total: ${data.usage.input_tokens + data.usage.output_tokens}`,
+    );
 
     while (data.stop_reason === 'tool_use') {
       const toolUse = data.content.find((b: any) => b.type === 'tool_use');
@@ -122,7 +134,7 @@ async function chat(initialMessages: Message[]) {
       const next = await fetch(URL, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify(buildRequest(messages)),
+        body: JSON.stringify(buildRequest(getContextWindow(messages, 6))),
       });
 
       data = await next.json();
