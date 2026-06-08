@@ -34,8 +34,6 @@ export class SemanticSearch {
       vector: vectors[i],
     }));
 
-    console.time('indexing');
-    console.log(`Indexed ${this.index.length} documents`);
     return this;
   }
 
@@ -63,17 +61,12 @@ export class SemanticSearch {
     });
     const queryVector = queryOutput.tolist()[0];
 
-    console.log('query embedding');
-    console.log('scoring');
-
     const scored = this.index.map((doc) => ({
       doc,
       score: this.cosineSimilarity(queryVector, doc.vector),
     }));
 
     scored.sort((a, b) => b.score - a.score);
-
-    console.time('scoring');
 
     return scored.slice(0, topK).map(({ doc, score }) => ({
       text: doc.text,
