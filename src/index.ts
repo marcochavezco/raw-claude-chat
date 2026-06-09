@@ -1,3 +1,5 @@
+// Interactive chat with RAG
+
 import { createInterface } from 'node:readline';
 import { stdin } from 'node:process';
 import { chat, type Message } from './lib/anthropic.js';

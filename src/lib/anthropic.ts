@@ -24,10 +24,55 @@ async function buildRequest(messages: any, query?: string) {
   return {
     model: 'claude-sonnet-4-5',
     max_tokens: 1024,
-    system: `Answer questions based only on the following context:\n${context.map((r: any) => r.text).join('\n')}`,
+    system: `
+    - Answer questions based only on the following context:\n${context.map((r: any) => r.text).join('\n')}
+    - You are an agent. Think step by step. Always use the search tool to find information. When you have a complete answer, you MUST call the finish tool with your final answer. Never respond directly with text.`,
     messages,
     tool_choice: { type: 'auto', disable_parallel_tool_use: true },
     tools: [
+      {
+        name: 'search',
+        description: 'Searches for relevant information based on a query',
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'The search query',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'finish',
+        description:
+          'Call this when you have enough information to give a final answer',
+        input_schema: {
+          type: 'object',
+          properties: {
+            answer: {
+              type: 'string',
+              description: 'The final answer to return',
+            },
+          },
+          required: ['answer'],
+        },
+      },
+      {
+        name: 'calculate',
+        description: 'Calculates a numeric expresion',
+        input_schema: {
+          type: 'object',
+          properties: {
+            expresion: {
+              type: 'string',
+              description: 'The expresion to evaluate',
+            },
+          },
+          required: ['expresion'],
+        },
+      },
       {
         name: 'get_word_count',
         description: 'Counts the number of words in a given text',
@@ -91,9 +136,20 @@ export async function chat(initialMessages: Message[]) {
 
     while (data.stop_reason === 'tool_use') {
       const toolUse = data.content.find((b: any) => b.type === 'tool_use');
+      console.log(`[tool call] ${toolUse.name}:`, toolUse.input);
 
       let result: string;
       switch (toolUse.name) {
+        case 'search':
+          const searchResult = await retrievalPipeline(toolUse.input.query);
+          result = JSON.stringify(searchResult);
+          break;
+        case 'finish':
+          return { finalAnswer: toolUse.input.answer };
+        case 'calculate':
+          const evalResult = eval(toolUse.input.expresion);
+          result = String(evalResult);
+          break;
         case 'get_word_count':
           result = String(getWordCount(toolUse.input.text));
           break;
@@ -118,6 +174,8 @@ export async function chat(initialMessages: Message[]) {
           ],
         },
       ];
+
+      console.log(`[tool result] ${result}`);
 
       const next = await fetch(URL, {
         method: 'POST',
