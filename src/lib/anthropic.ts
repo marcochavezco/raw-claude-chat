@@ -110,6 +110,8 @@ export async function chat(initialMessages: Message[]) {
 
   let data: any;
   let messages = [...initialMessages];
+  let iteration = 0;
+  const MAX_ITERATIONS = 5;
 
   const lastMessage = messages[messages.length - 1];
   const query =
@@ -135,29 +137,40 @@ export async function chat(initialMessages: Message[]) {
     );
 
     while (data.stop_reason === 'tool_use') {
+      if (iteration >= MAX_ITERATIONS) {
+        console.error(`[agent] max iterations (${MAX_ITERATIONS} reached)`);
+        return { error: 'max_iterations_reached', partialMessages: messages };
+      }
+      iteration++;
+      console.log(`[iteration ${iteration}]`);
+
       const toolUse = data.content.find((b: any) => b.type === 'tool_use');
       console.log(`[tool call] ${toolUse.name}:`, toolUse.input);
 
       let result: string;
-      switch (toolUse.name) {
-        case 'search':
-          const searchResult = await retrievalPipeline(toolUse.input.query);
-          result = JSON.stringify(searchResult);
-          break;
-        case 'finish':
-          return { finalAnswer: toolUse.input.answer };
-        case 'calculate':
-          const evalResult = eval(toolUse.input.expresion);
-          result = String(evalResult);
-          break;
-        case 'get_word_count':
-          result = String(getWordCount(toolUse.input.text));
-          break;
-        case 'reverse_text':
-          result = reverseText(toolUse.input.text);
-          break;
-        default:
-          throw new Error(`Unknown tool: ${toolUse.name}`);
+      try {
+        switch (toolUse.name) {
+          case 'search':
+            const searchResult = await retrievalPipeline(toolUse.input.query);
+            result = JSON.stringify(searchResult);
+            break;
+          case 'finish':
+            return { finalAnswer: toolUse.input.answer };
+          case 'calculate':
+            const evalResult = eval(toolUse.input.expresion);
+            result = String(evalResult);
+            break;
+          case 'get_word_count':
+            result = String(getWordCount(toolUse.input.text));
+            break;
+          case 'reverse_text':
+            result = reverseText(toolUse.input.text);
+            break;
+          default:
+            throw new Error(`Unknown tool: ${toolUse.name}`);
+        }
+      } catch (toolError: any) {
+        result = `Error: ${toolError.message}`;
       }
 
       messages = [
@@ -177,15 +190,19 @@ export async function chat(initialMessages: Message[]) {
 
       console.log(`[tool result] ${result}`);
 
-      const next = await fetch(URL, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(
-          await buildRequest(getContextWindow(messages, 6), query),
-        ),
-      });
-
-      data = await next.json();
+      try {
+        const next = await fetch(URL, {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify(
+            await buildRequest(getContextWindow(messages, 6), query),
+          ),
+        });
+        data = await next.json();
+      } catch (fetchError: any) {
+        console.error(`Fetch error: ${fetchError.message}`);
+        return { error: 'fetch_error', partialMessages: messages };
+      }
     }
     return data;
   } catch (error: any) {
